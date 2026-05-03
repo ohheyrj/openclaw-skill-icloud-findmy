@@ -6,6 +6,20 @@ This project replaces fragile shell parsing with a structured, agent-friendly in
 
 ---
 
+## Why This Is Forked
+
+This repo started as the `icloud-findmy` skill from ClawHub. It was forked after an incident where the agent host tried to auto-install `pyicloud` on itself, because the original skill's `clawdbot` metadata declared `requires.bins` and an `install` step that resolved against the agent host.
+
+In practice this skill must run on a designated macOS node — the one with an authenticated pyicloud session and Find My access. Installing on the agent host can't make the skill work and only causes the agent to mistakenly target itself.
+
+This fork:
+
+- Removes the auto-install metadata so the agent never tries to install pyicloud locally.
+- Adds an explicit **Execution Target** section in `SKILL.md` documenting that the wrapper runs on a remote macOS node.
+- Treats install on the target node as a one-time manual step.
+
+---
+
 ## Why This Exists
 
 The standard pyicloud CLI outputs human-readable text, not JSON.

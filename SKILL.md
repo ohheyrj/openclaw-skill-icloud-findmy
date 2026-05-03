@@ -2,7 +2,7 @@
 name: openclaw-skill-icloud-findmy
 description: Get Apple Find My device locations and battery status using a secure pyicloud wrapper.
 homepage: https://github.com/picklepete/pyicloud
-metadata: {"clawdbot":{"emoji":"📍","requires":{"bins":["icloud","icloud-findmy","python3"]},"install":[{"id":"pipx","kind":"shell","command":"brew install pipx && pipx install pyicloud","bins":["icloud"],"label":"Install pyicloud CLI (pipx)"}]}}
+metadata: {"clawdbot":{"emoji":"📍"}}
 ---
 
 # iCloud Find My (Secure)
@@ -12,6 +12,20 @@ This skill provides access to Apple Find My device locations and battery status 
 The wrapper script should be installed on PATH as `icloud-findmy`.
 
 Family Sharing support is optional.
+
+---
+
+## Execution Target
+
+This skill executes on a designated macOS node where `pyicloud` is installed and an authenticated session exists. The agent invokes the wrapper remotely (e.g. via SSH) against that node — it does **not** run locally on the agent host.
+
+Do not install `pyicloud` or the wrapper on the agent host. The agent host has no Apple ID session and cannot reach Find My; installing locally will not make this skill work and may cause the agent to mistakenly target itself.
+
+The target macOS node must have:
+
+- `pyicloud` installed (provides the `icloud` CLI)
+- The `icloud-findmy` wrapper on `PATH`
+- A current authenticated pyicloud session for the relevant Apple ID
 
 ---
 
