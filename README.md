@@ -54,22 +54,70 @@ The wrapper converts pyicloud output into normalized device objects.
 
 ## Installation
 
-### Install pyicloud
+> ⚠️ **Install on the target macOS node, not on the agent host.**
+> The agent does not run this skill locally. It invokes the wrapper remotely via `nodes.run`. Installing on the agent host gives it nothing to call into and risks the agent mistakenly targeting itself — which is the original incident this fork was created to prevent.
+
+These are one-time operator steps. Run them on the macOS machine that will hold the authenticated pyicloud session (in an openclaw setup, that's the node bound to this skill — e.g. `little-claw`).
+
+### 1. Install pyicloud
 
 ```bash
 brew install pipx
 pipx install pyicloud
 ```
 
-### Authenticate
+### 2. Install the wrapper
+
+From a clone of this repo on the target node:
+
+```bash
+cp scripts/icloud-findmy.py /usr/local/bin/icloud-findmy
+chmod +x /usr/local/bin/icloud-findmy
+```
+
+Verify:
+
+```bash
+which icloud-findmy
+icloud-findmy --help
+```
+
+### 3. Authenticate
+
+```bash
+icloud --username you@icloud.com --list
+```
+
+For Family Sharing devices:
 
 ```bash
 icloud --username you@icloud.com --with-family --list
 ```
 
-Complete password + 2FA.
+You'll be prompted for your Apple password and a 2FA code. The session persists locally on the target node and typically lasts 1–2 months.
 
-Session persists locally.
+### 4. Record the binding in your workspace
+
+Add the target node, Apple ID, and family flag to your workspace config (e.g. `TOOLS.md`), so the agent knows which node to call against:
+
+```
+## iCloud Find My
+Target Node: little-claw
+Apple ID: you@icloud.com
+Include Family Devices: true
+```
+
+---
+
+## Session Maintenance
+
+The pyicloud session expires every 1–2 months. Either run a heartbeat task that calls `icloud-findmy ... list` on the target node and pings you on failure, or set a cron on the target node:
+
+```
+0 9 * * * icloud-findmy --username APPLE_ID list > /dev/null 2>&1 || echo "icloud-findmy session expired" >> /var/log/icloud-findmy.log
+```
+
+When the session expires, re-run step 3 above.
 
 ---
 

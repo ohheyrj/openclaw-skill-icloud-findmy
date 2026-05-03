@@ -7,31 +7,27 @@ metadata: {"clawdbot":{"emoji":"📍"}}
 
 # iCloud Find My (Secure)
 
-This skill provides access to Apple Find My device locations and battery status using the `pyicloud` CLI and a secure local wrapper script.
+Access Apple Find My device locations and battery status via a secure `pyicloud` wrapper.
 
-The wrapper script should be installed on PATH as `icloud-findmy`.
-
-Family Sharing support is optional.
+Installation, authentication, and session maintenance are one-time operator tasks and live in `README.md` — they do not belong in agent context.
 
 ---
 
 ## Execution Target
 
-This skill executes on a designated macOS node where `pyicloud` is installed and an authenticated session exists. The agent invokes the wrapper remotely (e.g. via SSH) against that node — it does **not** run locally on the agent host.
+This skill runs on a designated macOS node where `pyicloud` is installed and an authenticated session exists. The agent does not run it locally.
 
-Do not install `pyicloud` or the wrapper on the agent host. The agent host has no Apple ID session and cannot reach Find My; installing locally will not make this skill work and may cause the agent to mistakenly target itself.
+Invoke every command via the node runner:
 
-The target macOS node must have:
+```
+nodes.run(node="<target-node>", command=["icloud-findmy", "--username", "<APPLE_ID>", ...])
+```
 
-- `pyicloud` installed (provides the `icloud` CLI)
-- The `icloud-findmy` wrapper on `PATH`
-- A current authenticated pyicloud session for the relevant Apple ID
+The target node, Apple ID, and family-sharing flag are stored in the workspace configuration (`TOOLS.md` or equivalent).
 
 ---
 
 ## When to Use (Triggers)
-
-Use this skill when the user asks:
 
 - Where is my phone, watch, iPad, or Mac?
 - Where am I right now?
@@ -42,78 +38,47 @@ Use this skill when the user asks:
 
 ---
 
-## Setup
-
-### 1. Install Dependencies
-
-brew install pipx
-pipx install pyicloud
-
-### 2. Install Wrapper Script
-
-cp scripts/icloud-findmy.py /usr/local/bin/icloud-findmy
-chmod +x /usr/local/bin/icloud-findmy
-
-### 3. Authenticate (One-Time)
-
-Run:
-
-icloud --username their.email@example.com --list
-
-If Family Sharing devices should also be included:
-
-icloud --username their.email@example.com --with-family --list
-
-The user will enter their password and complete Apple 2FA.
-
-The authenticated session is stored locally and typically lasts 1–2 months.
-
-### 4. Store Apple ID
-
-Add the Apple ID to workspace configuration:
-
-## iCloud Find My
-Apple ID: their.email@example.com
-Include Family Devices: true
-
-`Include Family Devices` is optional.
-
----
-
 ## Commands
 
-### List All Devices
+All commands execute on the target node. Wrap each in `nodes.run(node="<target>", command=[...])`.
 
+### List all devices
+
+```
 icloud-findmy --username APPLE_ID list
+```
 
-Returns structured JSON describing all devices.
+Returns structured JSON for every device.
 
 ---
 
-### Get Device Details (Single Device)
+### Get a single device
 
+```
 icloud-findmy --username APPLE_ID device --name "Richard's iPhone"
+```
 
-The `--name` argument is required.
-
-Matching is case-insensitive with fuzzy fallback.
+`--name` is required. Matching is case-insensitive with fuzzy fallback.
 
 ---
 
-### Get Device Locations
+### Get device locations
 
 All devices:
 
+```
 icloud-findmy --username APPLE_ID location
+```
 
 Single device:
 
+```
 icloud-findmy --username APPLE_ID location --name "Richard's iPhone"
-
-When `--name` is omitted, locations for all devices are returned.
+```
 
 Example output:
 
+```json
 {
   "name": "Richard's iPhone",
   "location": {
@@ -124,69 +89,50 @@ Example output:
   },
   "timestamp": "2026-03-02T12:34:56+00:00"
 }
+```
 
 ---
 
-### Get Battery Status
+### Get battery status
 
 All devices:
 
+```
 icloud-findmy --username APPLE_ID battery
+```
 
 Single device:
 
+```
 icloud-findmy --username APPLE_ID battery --name "Apple Watch Ultra 2"
-
-When `--name` is omitted, battery status for all devices is returned.
+```
 
 Example output:
 
+```json
 {
   "name": "Apple Watch Ultra 2",
   "battery_percent": 75.0,
   "battery_status": "NotCharging"
 }
+```
 
 ---
 
 ## Behaviour Notes
 
-- pyicloud outputs Python-style literals (single quotes, None, False)
-- The wrapper safely parses data using Python literal parsing
-- Battery levels are normalized to percentage values (0–100)
-- Location timestamps are converted to ISO-8601 format
+- pyicloud outputs Python-style literals (single quotes, `None`, `False`); the wrapper parses them safely with `ast.literal_eval`.
+- Battery levels are normalized to 0–100.
+- Location timestamps are ISO-8601.
 
 ---
 
-## Security Model
+## Recovery
 
-- No dynamic code execution
-- No unsafe parsing techniques
-- External commands executed without shell usage
-- Inputs validated before execution
-- Credentials handled only by pyicloud session storage
+If a command returns an authentication error, the pyicloud session on the target node has expired. Tell the user to re-authenticate on the target node:
 
----
-
-## Session Maintenance
-
-The pyicloud session expires every 1–2 months. Set up a cron job to verify the session is still valid.
-
-### Example Cron (daily at 9am)
 ```
-0 9 * * * icloud-findmy --username APPLE_ID list > /dev/null 2>&1 || echo "icloud-findmy session expired" >> /var/log/icloud-findmy.log
+icloud --username <APPLE_ID> --list
 ```
 
-If the agent encounters an authentication error during normal use, it should alert the user using the notification channel configured in `tools.md` and suggest re-running:
-```
-icloud --username APPLE_ID --list
-```
-
----
-
-## Notes
-
-- Requires macOS
-- Apple Find My must be enabled on devices
-- Family Sharing support is optional
-- Location updates typically occur every 1–5 minutes while devices are active
+This requires their Apple password and a 2FA code. Do not attempt to install or recover the session yourself — the full procedure is in `README.md`.
