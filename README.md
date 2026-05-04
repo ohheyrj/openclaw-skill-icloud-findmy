@@ -1,8 +1,13 @@
 # iCloud Find My — OpenClaw Skill
 
-A secure OpenClaw skill for accessing Apple **Find My** device locations and battery status using `pyicloud`.
+An OpenClaw skill for accessing Apple **Find My** device locations and battery status via the `pyicloud` CLI on a designated macOS node.
 
-This project replaces fragile shell parsing with a structured, agent-friendly interface.
+The skill is documentation only — there is no wrapper script. It records:
+
+- Where the underlying `icloud` command runs (a designated macOS node, **not** the agent host)
+- Which native pyicloud command shape to invoke
+- The response schema and how to interpret each field
+- Recovery procedure when the session expires
 
 ---
 
@@ -14,48 +19,16 @@ In practice this skill must run on a designated macOS node — the one with an a
 
 This fork:
 
-- Removes the auto-install metadata so the agent never tries to install pyicloud locally.
-- Adds an explicit **Execution Target** section in `SKILL.md` documenting that the wrapper runs on a remote macOS node.
-- Treats install on the target node as a one-time manual step.
-
----
-
-## Why This Exists
-
-The standard pyicloud CLI outputs human-readable text, not JSON.
-
-Many examples online suggest unsafe parsing techniques (`eval()`), which introduce security risks.
-
-This skill provides:
-
-- ✅ Safe parsing
-- ✅ Structured JSON output
-- ✅ Reliable agent integration
-- ✅ No shell grep pipelines
-- ✅ OpenClaw security scanner friendly
-
----
-
-## Architecture
-
-```
-pyicloud CLI
-      ↓
-icloud-findmy (Python wrapper)
-      ↓
-Structured JSON
-      ↓
-OpenClaw Skill
-```
-
-The wrapper converts pyicloud output into normalized device objects.
+- **Removes the auto-install metadata** so the agent never tries to install pyicloud locally.
+- **Adds an explicit Execution Target** in `SKILL.md` so the agent knows the skill runs remotely via `nodes.run`.
+- **Drops the wrapper script.** The original skill bundled a Python wrapper to convert pyicloud's text output into JSON. pyicloud 2.x emits JSON natively (`icloud devices list --locate --format json`), so the wrapper is no longer needed. Less code to maintain, no parser to break when pyicloud's text format drifts.
 
 ---
 
 ## Installation
 
 > ⚠️ **Install on the target macOS node, not on the agent host.**
-> The agent does not run this skill locally. It invokes the wrapper remotely via `nodes.run`. Installing on the agent host gives it nothing to call into and risks the agent mistakenly targeting itself — which is the original incident this fork was created to prevent.
+> The agent does not run this skill locally. It invokes `icloud` remotely via `nodes.run`. Installing on the agent host gives it nothing to call into and risks the agent mistakenly targeting itself — which is the original incident this fork was created to prevent.
 
 These are one-time operator steps. Run them on the macOS machine that will hold the authenticated pyicloud session (in an openclaw setup, that's the node bound to this skill — e.g. `little-claw`).
 
@@ -66,152 +39,76 @@ brew install pipx
 pipx install pyicloud
 ```
 
-### 2. Install the wrapper
+This provides the `icloud` CLI. Version 2.x or later is required — earlier versions don't emit JSON natively.
 
-From a clone of this repo on the target node:
-
-```bash
-cp scripts/icloud-findmy.py /usr/local/bin/icloud-findmy
-chmod +x /usr/local/bin/icloud-findmy
-```
-
-Verify:
+### 2. Authenticate
 
 ```bash
-which icloud-findmy
-icloud-findmy --help
+icloud auth login --username you@icloud.com
 ```
 
-### 3. Authenticate
+You'll be prompted for your Apple password and a 2FA code on a trusted Apple device. Confirm "Trust this device" when offered — this elevates the session for full CloudKit access.
+
+The session persists locally on the target node and typically lasts 1–2 months.
+
+### 3. Verify
 
 ```bash
-icloud --username you@icloud.com --list
+icloud devices list --locate --format json
 ```
 
-For Family Sharing devices:
-
-```bash
-icloud --username you@icloud.com --with-family --list
-```
-
-You'll be prompted for your Apple password and a 2FA code. The session persists locally on the target node and typically lasts 1–2 months.
+Should return a JSON array of devices with battery and (where available) location.
 
 ### 4. Record the binding in your workspace
 
-Add the target node, Apple ID, and family flag to your workspace config (e.g. `TOOLS.md`), so the agent knows which node to call against:
+Add the target node and Apple ID to your workspace config (e.g. `TOOLS.md`), so the agent knows which node to call against:
 
 ```
 ## iCloud Find My
 Target Node: little-claw
 Apple ID: you@icloud.com
-Include Family Devices: true
 ```
 
 ---
 
 ## Session Maintenance
 
-The pyicloud session expires every 1–2 months. Either run a heartbeat task that calls `icloud-findmy ... list` on the target node and pings you on failure, or set a cron on the target node:
+The pyicloud session expires every 1–2 months. Either run a heartbeat task that calls `icloud devices list --format json` on the target node and pings you on failure, or set a cron on the target node:
 
 ```
-0 9 * * * icloud-findmy --username APPLE_ID list > /dev/null 2>&1 || echo "icloud-findmy session expired" >> /var/log/icloud-findmy.log
+0 9 * * * icloud devices list --format json > /dev/null 2>&1 || echo "icloud session expired" >> /var/log/icloud.log
 ```
 
-When the session expires, re-run step 3 above.
+When the session expires, re-run step 2 above.
 
 ---
 
-## Usage
+## Recovery
 
-### List devices
+If the agent reports an authentication error (HTTP 421, "Invalid global session"), the session has lapsed. Re-run step 2 on the target node.
 
-```bash
-icloud-findmy --username you@icloud.com list
-```
-
----
-
-### Get device
-
-```bash
-icloud-findmy --username you@icloud.com device --name "Richard's iPhone"
-```
-
----
-
-### Get location
-
-```bash
-icloud-findmy --username you@icloud.com location --name "Richard's iPhone"
-```
-
----
-
-### Get battery
-
-```bash
-icloud-findmy --username you@icloud.com battery --name "Apple Watch Ultra 2"
-```
-
----
-
-## Output Schema
-
-### Device
-
-```json
-{
-  "name": "Richard's iPhone",
-  "display_name": "iPhone 17 Pro Max",
-  "device_class": "iPhone",
-  "battery_percent": 75,
-  "battery_status": "NotCharging",
-  "location": {
-    "latitude": 51.43,
-    "longitude": -0.16
-  }
-}
-```
-
----
-
-## Security Model
-
-- Uses `ast.literal_eval()` for safe parsing
-- Never executes dynamic code
-- No credential storage beyond pyicloud session
-- Compatible with OpenClaw security scanning
-
----
-
-## Requirements
-
-- macOS
-- Python 3.10+
-- pyicloud
-- Apple ID with Find My enabled
+Note: pyicloud has different trust scopes per service. If you've authenticated for Find My (`icloud devices`) but get `421` on other services like `icloud reminders`, those services need a fully-trusted session — make sure you confirmed "Trust this device" during authentication.
 
 ---
 
 ## Limitations
 
-- Apple does not provide official Find My API access
-- Location may be cached
-- Some accessories may not report battery/location
+- Apple does not provide official Find My API access; pyicloud uses a reverse-engineered endpoint.
+- Location can be cached up to several minutes; `--locate` triggers a live ping but is rate-limited.
+- Some accessories (AirPods, accessories without GPS) often report `null` location and `0.0/Unknown` battery even when in use.
 
 ---
 
-## Future Ideas
+## Requirements
 
-- Home/away detection
-- Background battery alerts
-- Geofence triggers
-- Automatic location context for agents
-- Multi-user support
+- macOS on the target node
+- Python 3.10+
+- `pyicloud` 2.x
+- Apple ID with Find My enabled on relevant devices
 
 ---
 
 ## Credits
 
-- pyicloud: https://github.com/picklepete/pyicloud
-- Apple Find My ecosystem
+- pyicloud: https://github.com/picklepete/pyicloud (the underlying library and CLI)
+- ClawHub `icloud-findmy` skill (original, pre-fork)
